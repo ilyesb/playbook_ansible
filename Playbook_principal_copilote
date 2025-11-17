@@ -1,0 +1,39 @@
+---
+- name: Désinstaller des programmes Windows de façon sûre
+  hosts: windows
+  gather_facts: no
+  strategy: free
+  vars:
+    # Option: si tu préfères mettre les noms ici au lieu de group_vars
+    # programs_to_remove:
+    #   - "Microsoft .NET Runtime 8.0.22 (x64)"
+    #   - "Microsoft .NET Runtime 9.0.11 (x64)"
+  tasks:
+    - name: Récupérer la liste des packages installés
+      community.windows.win_package_facts:
+      register: installed_pkgs
+
+    - name: Construire la liste des packages présents à désinstaller
+      vars:
+        installed_names: "{{ installed_pkgs.packages | map(attribute='name') | list }}"
+      set_fact:
+        uninstall_targets: "{{ programs_to_remove | select('in', installed_names) | list }}"
+
+    - name: Afficher ce qui sera désinstallé sur cet hôte
+      debug:
+        msg: "{{ uninstall_targets }}"
+      when: uninstall_targets | length > 0
+
+    - name: Désinstaller chaque programme présent
+      community.windows.win_package:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ uninstall_targets }}"
+      register: removal_results
+
+    - name: Résumé de la désinstallation
+      debug:
+        msg: >
+          Désinstallations effectuées: {{
+            removal_results.results | selectattr('changed') | map(attribute='item') | list
+          }}
