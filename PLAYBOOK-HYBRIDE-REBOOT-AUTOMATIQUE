@@ -1,0 +1,100 @@
+---
+- name: Désinstallation intelligente avec reboot automatique si nécessaire
+  hosts: windows
+  gather_facts: no
+  become: no
+
+  vars:
+    # Liste des programmes à supprimer (wildcards autorisés)
+    programmes_a_supprimer:
+      - "Microsoft .NET Runtime 8*"
+      - "Microsoft .NET Runtime 9*"
+
+  tasks:
+
+    - name: Récupérer la liste des programmes installés
+      ansible.windows.win_package_facts:
+      register: installed_pkgs
+
+    - name: Trouver les programmes correspondant aux patterns
+      set_fact:
+        uninstall_targets: >-
+          {{
+            installed_pkgs.packages
+            | map(attribute='name')
+            | select('match', item)
+            | list
+          }}
+      loop: "{{ programmes_a_supprimer }}"
+      register: match_results
+
+    - name: Fusionner en une liste unique finale
+      set_fact:
+        uninstall_final: >-
+          {{
+            match_results.results
+            | map(attribute='ansible_facts.uninstall_targets')
+            | list
+            | flatten
+            | unique
+          }}
+
+    - name: Afficher les programmes trouvés
+      debug:
+        msg: "Programmes à désinstaller : {{ uninstall_final }}"
+      when: uninstall_final | length > 0
+
+
+    # ---------------------------
+    #  Désinstallation
+    # ---------------------------
+    - name: Désinstaller les programmes détectés
+      ansible.windows.win_package:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ uninstall_final }}"
+      register: uninstall_results
+      when: uninstall_final | length > 0
+
+
+    # ---------------------------
+    #  Analyse du besoin de reboot
+    # ---------------------------
+    - name: Vérifier si un reboot est nécessaire
+      set_fact:
+        reboot_needed: >-
+          {{
+            uninstall_results.results
+            | selectattr('reboot_required', 'equalto', true)
+            | list
+            | length > 0
+          }}
+      when: uninstall_final | length > 0
+
+    - name: Afficher si un reboot est requis
+      debug:
+        msg: "Reboot nécessaire : {{ reboot_needed }}"
+      when: uninstall_final | length > 0
+
+
+    # ---------------------------
+    #  Redémarrage automatique si nécessaire
+    # ---------------------------
+    - name: Redémarrer la machine si nécessaire
+      ansible.windows.win_reboot:
+      when: reboot_needed | bool
+
+
+    - name: Afficher résumé final
+      debug:
+        msg: |
+          Programmes désinstallés :
+          {{ uninstall_results.results | selectattr('changed', 'equalto', true) | map(attribute='item') | list }}
+          Redémarrage effectué : {{ reboot_needed | bool }}
+      when: uninstall_final | length > 0
+
+
+    - name: Aucun programme à désinstaller
+      debug:
+        msg: "Aucun runtime .NET correspondant n'a été trouvé."
+      when: uninstall_final | length == 0
