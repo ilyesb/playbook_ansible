@@ -1,0 +1,24 @@
+---
+- name: Desinstallation de programmes Windows sur plusieurs machines
+  hosts: windows
+  gather_facts: no
+  become: no
+
+  vars:
+    programmes_a_supprimer:
+      - name: "Microsoft .NET Runtime 8.0.22"
+      - name: "Microsoft .NET Runtime 9.0.11"
+
+  tasks:
+
+    - name: Désinstallation des programmes spécifiés
+      win_package:
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ programmes_a_supprimer }}"
+      register: uninstall_results
+      ignore_errors: yes    # Continue même si un programme n'est pas trouvé
+
+    - name: Afficher les résultats
+      debug:
+        msg: "{{ uninstall_results }}"
